@@ -1,0 +1,112 @@
+buildscript {
+    repositories {
+        // LensKit releases are published to Maven Central
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'org.lenskit:lenskit-gradle:3.0-M3'
+    }
+}
+
+apply plugin: 'java'
+apply plugin: 'lenskit'
+
+apply from: "$rootDir/gradle/repositories.gradle"
+
+import org.lenskit.gradle.*
+
+dependencies {
+    compile group: 'org.lenskit', name: 'lenskit-cli', version: '3.0-M3'
+    compileOnly 'com.google.auto.service:auto-service:1.0-rc3'
+    compile group: 'edu.stanford.nlp', name: 'stanford-corenlp', version: '3.8.0'
+    runtime group: 'edu.stanford.nlp', name: 'stanford-corenlp', version: '3.8.0', classifier: 'models'
+}
+
+task convertOfficeProducts(type: JavaExec, group: 'preparation') {
+    description 'Convert office product data from raw downloads'
+    classpath = sourceSets.main.runtimeClasspath
+    main 'org.lenskit.cli.Main'
+    args 'translate-amazon'
+    args '-d', file('data/office-products')
+    args file('data/reviews_Office_Products_5.json.gz')
+    args file('data/meta_Office_Products.json.gz')
+
+    inputs.file 'data/reviews_Office_Products_5.json.gz'
+    inputs.file 'data/meta_Office_Products.json.gz'
+    inputs.file 'data/amazon.yml'
+    outputs.dir 'data/office-products'
+
+    doLast {
+        copy {
+            from 'data'
+            into 'data/office-products'
+            include 'amazon.yml'
+        }
+    }
+}
+
+task crossfoldOfficeProducts(type: Crossfold) {
+    description 'crossfold office product data for evaluation'
+    mustRunAfter convertOfficeProducts // if converting & crossfolding, convert first
+    classpath = configurations.runtime
+
+    dataSetName 'office-products'
+    input 'data/office-products/amazon.yml'
+    inputs.dir 'data/office-products' // re-run crossfold after re-convert
+    outputDir "$buildDir/office-products-xf"
+    method 'sample-users'
+    partitionCount 5
+    sampleSize 500
+    holdout 1
+}
+
+task evalOfficeProducts(type: TrainTest, group: 'evaluation') {
+    description 'evaluate recommenders on office product data'
+    logFile "$buildDir/eval-office-products.log"
+    logFileLevel 'DEBUG'
+
+    dataSet crossfoldOfficeProducts
+
+    algorithm 'Popular', 'cfg/popular.groovy'
+    algorithm 'GlobalMean', 'cfg/global-mean.groovy'
+    algorithm 'ItemMean', 'cfg/item-mean.groovy'
+    algorithm 'PersMean', 'cfg/pers-mean.groovy'
+    algorithm 'II-E', 'cfg/item-item-explicit.groovy'
+    algorithm 'UU-E', 'cfg/user-user-explicit.groovy'
+    algorithm 'MF-E', 'cfg/funksvd-explicit.groovy'
+    algorithm 'II-I', 'cfg/item-item-implicit.groovy'
+    algorithm 'UU-I', 'cfg/user-user-implicit.groovy'
+    algorithm 'MF-I', 'cfg/funksvd-implicit.groovy'
+    algorithm 'cfg/ii-spread.groovy'
+
+    outputFile "$buildDir/office-products-out.csv"
+    userOutputFile "$buildDir/office-products-users.csv"
+
+    predict {
+        metric 'rmse'
+    }
+    recommend {
+        outputFile "$buildDir/office-products-recs.csv.gz"
+        listSize 100
+        metric 'mrr'
+        metric 'pr'
+    }
+}
+
+task recommend(type: JavaExec, group: 'run') {
+    ext.dataSet = project.findProperty('dataSet') ?: 'office-products'
+    ext.algorithm = project.findProperty('algorithm') ?: 'popular'
+    ext.userId = project.findProperty('userId') ?: '1'
+
+    dependsOn "convert${dataSet.replaceAll(/(^|-)(\w)/, {it[2].toUpperCase()})}"
+
+    classpath = sourceSets.main.runtimeClasspath
+    main 'org.lenskit.cli.Main'
+    args '--log-file', "$buildDir/recommend.log"
+    args '--log-file-level', 'DEBUG'
+    args 'recommend'
+    args '-n', '5'
+    args '-c', "cfg/${algorithm}.groovy"
+    args '--data-source', "data/$dataSet/amazon.yml"
+    args userId
+}

@@ -1,0 +1,181 @@
+buildscript {
+    repositories {
+        // LensKit snapshots are published to the Sonatype snapshot repository
+        maven {
+            url 'https://oss.sonatype.org/content/repositories/snapshots/'
+        }
+        // LensKit releases are published to Maven Central
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'org.lenskit:lenskit-gradle:3.0-M2'
+    }
+}
+
+ext.lenskitVersion = '3.0-M2'
+if (!hasProperty('dataDir')) {
+    ext.dataDir = 'data'
+}
+
+ext.userIds = (project.findProperty('userId') ?: '320').split(/,/).toList()
+ext.itemIds = (project.findProperty('itemIds') ?: '260,153,527,588').split(/,/).toList()
+ext.biasModel = project.findProperty('biasModel') ?: 'user-item'
+
+apply plugin: 'java'
+apply plugin: 'lenskit'
+
+apply from: "$rootDir/gradle/repositories.gradle"
+
+dependencies {
+    compile "org.lenskit:lenskit-all:$lenskitVersion"
+    runtime "org.lenskit:lenskit-cli:$lenskitVersion"
+    compile "org.apache.commons:commons-math3:3.6.1"
+}
+
+task trainModel(type: JavaExec, group: 'run') {
+    classpath sourceSets.main.runtimeClasspath
+    main 'org.lenskit.cli.Main'
+    args '--log-file', file("$buildDir/train-model.log"), '--log-file-level', 'DEBUG'
+    args 'train-model'
+    args '--data-source', file("$dataDir/movielens.yml")
+    args '-o', "$buildDir/${biasModel}.bin"
+    args file('etc/svd.groovy')
+    args file("etc/${biasModel}-bias.groovy")
+    if (lenskit.maxMemory) {
+        maxHeapSize lenskit.maxMemory
+    }
+}
+
+task recommend(type: JavaExec, group: 'run') {
+    classpath sourceSets.main.runtimeClasspath
+    main 'org.lenskit.cli.Main'
+    args '--log-file', file("$buildDir/recommend.log"), '--log-file-level', 'DEBUG'
+    args 'recommend'
+    args '--data-source', file("$dataDir/movielens.yml")
+    args '-c', file('etc/svd.groovy')
+    args '-c', file("etc/${biasModel}-bias.groovy")
+    args userIds
+    if (lenskit.maxMemory) {
+        maxHeapSize lenskit.maxMemory
+    }
+}
+
+task predict(type: JavaExec, group: 'run') {
+    classpath sourceSets.main.runtimeClasspath
+    main 'org.lenskit.cli.Main'
+    args '--log-file', file("$buildDir/predict.log"), '--log-file-level', 'DEBUG'
+    args 'predict'
+    args '--data-source', file("$dataDir/movielens.yml")
+    args '-c', file('etc/svd.groovy')
+    args '-c', file("etc/${biasModel}-bias.groovy")
+    if (userIds.size() > 0) {
+        args userIds.first()
+        args itemIds
+    }
+    if (lenskit.maxMemory) {
+        maxHeapSize lenskit.maxMemory
+    }
+}
+
+task runAllGlobalMean(type: GradleBuild) {
+    tasks = ['recommend', 'predict']
+    startParameter.projectProperties['biasModel'] = 'global-mean'
+    if (lenskit.maxMemory) {
+        startParameter.projectProperties['lenskit.maxMemory'] = lenskit.maxMemory
+    }
+}
+
+task runAllUserMean(type: GradleBuild) {
+    tasks = ['recommend', 'predict']
+    startParameter.projectProperties['biasModel'] = 'user-mean'
+    if (lenskit.maxMemory) {
+        startParameter.projectProperties['lenskit.maxMemory'] = lenskit.maxMemory
+    }
+}
+
+task runAllItemMean(type: GradleBuild) {
+    tasks = ['recommend', 'predict']
+    startParameter.projectProperties['biasModel'] = 'item-mean'
+    if (lenskit.maxMemory) {
+        startParameter.projectProperties['lenskit.maxMemory'] = lenskit.maxMemory
+    }
+}
+
+task runAllPersMean(type: GradleBuild) {
+    tasks = ['recommend', 'predict']
+    startParameter.projectProperties['biasModel'] = 'pers-mean'
+    if (lenskit.maxMemory) {
+        startParameter.projectProperties['lenskit.maxMemory'] = lenskit.maxMemory
+    }
+}
+
+task runAll {
+    dependsOn runAllGlobalMean, runAllUserMean, runAllItemMean, runAllPersMean
+}
+
+task prepareSubmission(type: Copy, group: 'package') {
+    from jar
+    into distsDir
+    rename(/-assignment/, '-submission')
+}
+
+import org.lenskit.gradle.Crossfold
+import org.lenskit.gradle.TrainTest
+
+task crossfold(type: Crossfold, group: 'evaluate') {
+    // download data before evaluating
+
+    input "$dataDir/movielens.yml"
+    // test on random 1/5 of each user's ratings
+    holdout(5, 'random')
+    // use 5-fold cross-validation
+    partitionCount 5
+    // pack data for efficiency
+    outputFormat 'gz'
+}
+
+/* Run the LensKit evaluation */
+task evaluate(type: TrainTest, group: 'evaluate') {
+    description 'Runs the LensKit evaluation.'
+
+    // we add our crossfold task as evaluation input
+    dataSet crossfold
+
+    // send the output to appropriate files
+    outputFile "build/eval-results.csv"
+    userOutputFile "build/eval-users.csv"
+
+    // configure our algorithms
+    algorithm 'etc/algorithms.groovy'
+    cacheDirectory "$buildDir/eval-cache"
+
+    // and some evaluation tasks and metrics
+    predict {
+        metric 'coverage'
+        metric 'rmse'
+        metric 'ndcg'
+    }
+    recommend {
+        listSize 10
+        candidates "allItems"
+        exclude "user.trainItems"
+        metric 'ndcg'
+        metric 'map'
+        metric 'mrr'
+    }
+}
+
+task visualize(type: JavaExec, group: 'debug') {
+    description 'Draws a graph of the SVD recommender'
+    inputs.property('bias', biasModel)
+    inputs.file 'etc/svd.groovy'
+    inputs.file "etc/$biasModel-bias.groovy"
+    inputs.files sourceSets.main.runtimeClasspath
+    outputs.file "$buildDir/svd-${biasModel}.dot"
+
+    classpath sourceSets.main.runtimeClasspath
+    main 'org.lenskit.cli.Main'
+    args 'graph'
+    args '-o', "$buildDir/svd-${biasModel}.dot"
+    args 'etc/svd.groovy', "etc/${biasModel}-bias.groovy"
+}

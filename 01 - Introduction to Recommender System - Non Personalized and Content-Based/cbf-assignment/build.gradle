@@ -1,0 +1,58 @@
+apply plugin: 'java'
+
+ext.lenskitVersion = '3.0-M1'
+if (!hasProperty('dataDir')) {
+    ext.dataDir = 'data'
+}
+
+sourceCompatibility = 1.7
+
+apply from: "$rootDir/gradle/repositories.gradle"
+
+ext.userIds = (project.findProperty('userId') ?: '320').split(/,/).toList()
+
+dependencies {
+    compile "org.lenskit:lenskit-all:$lenskitVersion"
+    runtime "org.lenskit:lenskit-cli:$lenskitVersion"
+    testCompile 'junit:junit:4.12'
+    testCompile 'org.hamcrest:hamcrest-library:1.3'
+}
+
+task recommendBasic(type: JavaExec, group: 'run') {
+    description 'Runs the recommender with the basic profile.'
+    classpath sourceSets.main.runtimeClasspath
+    main 'org.lenskit.cli.Main'
+    args '--log-file', file("$buildDir/recommend-basic.log"), '--log-file-level', 'DEBUG'
+    args 'recommend'
+    args '--data-source', "$dataDir/movielens.yml"
+    args '-c', 'etc/basic.groovy'
+    args userIds
+    if (project.hasProperty('lenskit.maxMemory')) {
+        maxHeapSize project.getProperty('lenskit.maxMemory')
+    }
+}
+
+task recommendWeighted(type: JavaExec, group: 'run') {
+    description 'Runs the recommender with the basic profile.'
+    classpath sourceSets.main.runtimeClasspath
+    main 'org.lenskit.cli.Main'
+    args '--log-file', file("$buildDir/recommend-weighted.log"), '--log-file-level', 'DEBUG'
+    args 'recommend'
+    args '--data-source', "$dataDir/movielens.yml"
+    args '-c', 'etc/weighted.groovy'
+    args userIds
+    if (project.hasProperty('lenskit.maxMemory')) {
+        maxHeapSize project.getProperty('lenskit.maxMemory')
+    }
+}
+
+task runAll(group: 'run') {
+    dependsOn recommendBasic
+    dependsOn recommendWeighted
+}
+
+task prepareSubmission(type: Copy) {
+    from jar
+    into distsDir
+    rename(/-assignment/, '-submission')
+}

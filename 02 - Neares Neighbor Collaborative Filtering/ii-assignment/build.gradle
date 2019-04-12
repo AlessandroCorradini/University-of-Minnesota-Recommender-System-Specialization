@@ -1,0 +1,71 @@
+ext.lenskitVersion = '3.0-M1'
+if (!hasProperty('dataDir')) {
+    ext.dataDir = 'data'
+}
+
+ext.userIds = (project.findProperty('userId') ?: '320').split(/,/).toList()
+ext.itemIds = (project.findProperty('itemIds') ?: '260,153,527,588').split(/,/).toList()
+
+apply plugin: 'java'
+
+apply from: "$rootDir/gradle/repositories.gradle"
+
+dependencies {
+    compile "org.lenskit:lenskit-core:$lenskitVersion"
+    runtime "org.lenskit:lenskit-cli:$lenskitVersion"
+}
+
+task recommend(type: JavaExec, group: 'run') {
+    classpath sourceSets.main.runtimeClasspath
+    main 'org.lenskit.cli.Main'
+    args '--log-file', file("$buildDir/recommend.log"), '--log-file-level', 'DEBUG'
+    args 'recommend'
+    args '--data-source', file("$dataDir/movielens.yml")
+    args '-c', file('etc/item-item.groovy')
+    args userIds
+    if (project.hasProperty('heapSize')) {
+        maxHeapSize project.heapSize
+    }
+    if (project.hasProperty('lenskit.maxMemory')) {
+        maxHeapSize project.getProperty('lenskit.maxMemory')
+    }
+}
+
+task itemBasedRecommend(type: JavaExec, group: 'run') {
+    classpath sourceSets.main.runtimeClasspath
+    main 'org.lenskit.cli.Main'
+    args '--log-file', file("$buildDir/item-based-recommend.log"), '--log-file-level', 'DEBUG'
+    args 'global-recommend'
+    args '--data-source', file("$dataDir/movielens.yml")
+    args '-c', file('etc/item-item.groovy')
+    args itemIds
+    if (project.hasProperty('lenskit.maxMemory')) {
+        maxHeapSize project.getProperty('lenskit.maxMemory')
+    }
+}
+
+task predict(type: JavaExec, group: 'run') {
+    classpath sourceSets.main.runtimeClasspath
+    main 'org.lenskit.cli.Main'
+    args '--log-file', file("$buildDir/predict.log"), '--log-file-level', 'DEBUG'
+    args 'predict'
+    args '--data-source', file("$dataDir/movielens.yml")
+    args '-c', file('etc/item-item.groovy')
+    if (userIds.size() > 0) {
+        args userIds.first()
+        args itemIds
+    }
+    if (project.hasProperty('lenskit.maxMemory')) {
+        maxHeapSize project.getProperty('lenskit.maxMemory')
+    }
+}
+
+task runAll(group: 'run') {
+    dependsOn predict, recommend, itemBasedRecommend
+}
+
+task prepareSubmission(type: Copy, group: 'package') {
+    from jar
+    into distsDir
+    rename(/-assignment/, '-submission')
+}

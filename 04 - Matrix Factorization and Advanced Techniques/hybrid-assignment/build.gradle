@@ -1,0 +1,227 @@
+buildscript {
+    repositories {
+        // LensKit snapshots are published to the Sonatype snapshot repository
+        maven {
+            url 'https://oss.sonatype.org/content/repositories/snapshots/'
+        }
+        // LensKit releases are published to Maven Central
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'org.lenskit:lenskit-gradle:3.0-M2'
+    }
+}
+
+ext.lenskitVersion = '3.0-M2'
+if (!hasProperty('dataDir')) {
+    ext.dataDir = 'data'
+}
+
+ext.userIds = (project.findProperty('userId') ?: '320').split(/,/).toList()
+ext.itemIds = (project.findProperty('itemIds') ?: '260,153,527,588').split(/,/).toList()
+ext.baseline = project.findProperty('baseilne') ?: 'pers-mean'
+
+apply plugin: 'java' // if you use Groovy or Scala, add those plugins
+apply plugin: 'lenskit'
+
+apply from: "$rootDir/gradle/repositories.gradle"
+
+dependencies {
+    compile "org.lenskit:lenskit-all:$lenskitVersion"
+    compile "org.apache.lucene:lucene-analyzers:3.5.0"
+    compile "org.apache.lucene:lucene-queries:3.5.0"
+
+    runtime "org.lenskit:lenskit-cli:$lenskitVersion"
+}
+
+task recommendLuceneSVD(type: JavaExec, group: 'run') {
+    classpath sourceSets.main.runtimeClasspath
+    main 'org.lenskit.cli.Main'
+    args '--log-file', file("$buildDir/recommend-lucene-svd.log"), '--log-file-level', 'DEBUG'
+    args 'recommend'
+    args '--data-source', file("$dataDir/movielens.yml")
+    args '-c', file('cfg/lucene-svd.groovy')
+    args userIds
+    if (lenskit.maxMemory) {
+        maxHeapSize lenskit.maxMemory
+    }
+    systemProperties(
+            blendWeight: project.findProperty('blendWeight'),
+            predictor: 'bias')
+}
+
+task recommendIISVD(type: JavaExec, group: 'run') {
+    classpath sourceSets.main.runtimeClasspath
+    main 'org.lenskit.cli.Main'
+    args '--log-file', file("$buildDir/recommend-ii-svd.log"), '--log-file-level', 'DEBUG'
+    args 'recommend'
+    args '--data-source', file("$dataDir/movielens.yml")
+    args '-c', file('cfg/ii-svd.groovy')
+    args userIds
+    if (lenskit.maxMemory) {
+        maxHeapSize lenskit.maxMemory
+    }
+    systemProperties(
+            blendWeight: project.findProperty('blendWeight'),
+            predictor: 'ii')
+}
+
+task recommendSVDLog(type: JavaExec, group: 'run') {
+    classpath sourceSets.main.runtimeClasspath
+    main 'org.lenskit.cli.Main'
+    args '--log-file', file("$buildDir/recommend-svd-log.log"), '--log-file-level', 'DEBUG'
+    args 'recommend'
+    args '--data-source', file("$dataDir/movielens.yml")
+    args '-c', file('cfg/svd-log.groovy')
+    args userIds
+    if (lenskit.maxMemory) {
+        maxHeapSize lenskit.maxMemory
+    }
+}
+
+task recommendLuceneSVDLog(type: JavaExec, group: 'run') {
+    classpath sourceSets.main.runtimeClasspath
+    main 'org.lenskit.cli.Main'
+    args '--log-file', file("$buildDir/recommend-lucene-svd-log.log"), '--log-file-level', 'DEBUG'
+    args 'recommend'
+    args '--data-source', file("$dataDir/movielens.yml")
+    args '-c', file('cfg/lucene-svd-log.groovy')
+    args userIds
+    if (lenskit.maxMemory) {
+        maxHeapSize lenskit.maxMemory
+    }
+}
+
+task runAll(group: 'run', dependsOn: ['recommendLuceneSVD', 'recommendIISVD',
+                                      'recommendSVDLog', 'recommendLuceneSVDLog'])
+
+task graphSVDLog(type: JavaExec, group: 'run') {
+    classpath sourceSets.main.runtimeClasspath
+    main 'org.lenskit.cli.Main'
+    args '--log-file', file("$buildDir/graph-svd-log.log"), '--log-file-level', 'DEBUG', '--debug-grapht'
+    args 'graph'
+    args '-o', "$buildDir/svd-log.dot"
+    args file('cfg/svd-log.groovy')
+    if (lenskit.maxMemory) {
+        maxHeapSize lenskit.maxMemory
+    }
+    systemProperties(
+            blendWeight: project.findProperty('blendWeight'),
+            predictor: 'ii')
+}
+
+task graphLuceneSVDLog(type: JavaExec, group: 'run') {
+    classpath sourceSets.main.runtimeClasspath
+    main 'org.lenskit.cli.Main'
+    args '--log-file', file("$buildDir/graph-lucene-svd-log.log"), '--log-file-level', 'DEBUG', '--debug-grapht'
+    args 'graph'
+    args '-o', "$buildDir/lucene-svd-log.dot"
+    args file('cfg/svd-log.groovy')
+    if (lenskit.maxMemory) {
+        maxHeapSize lenskit.maxMemory
+    }
+    systemProperties(
+            blendWeight: project.findProperty('blendWeight'),
+            predictor: 'ii')
+}
+
+task prepareSubmission(type: Copy, group: 'package') {
+    from jar
+    into distsDir
+    rename(/-assignment/, '-submission')
+}
+
+import org.lenskit.gradle.Crossfold
+import org.lenskit.gradle.TrainTest
+
+task crossfold(type: Crossfold, group: 'evaluate') {
+    // download data before evaluating
+
+    input "$dataDir/movielens.yml"
+    // test on random 1/5 of each user's ratings
+    holdout(5, 'random')
+    // use 5-fold cross-validation
+    partitionCount 5
+    outputFormat 'gz'
+}
+
+/* Sweep the hybrid parameters */
+task sweepHybrid(type: TrainTest, group: 'evaluate') {
+    description 'Runs a LensKit evaluation to sweep hybrid parameters.'
+
+    // we add our crossfold task as evaluation input
+    dataSet crossfold
+
+    // send the output to appropriate files
+    outputFile "build/sweep-results.csv"
+    userOutputFile "build/sweep-users.csv"
+    cacheDirectory "build/eval-cache"
+    logFile "build/sweep-users.log"
+
+    // configure our algorithms
+    algorithm 'cfg/hybridsweep.groovy'
+    algorithm 'cfg/ii.groovy'
+    algorithm 'cfg/svd.groovy'
+    algorithm 'cfg/lucene.groovy'
+
+    // and some evaluation tasks and metrics
+    predict {
+        metric 'coverage'
+        metric 'rmse'
+        metric 'ndcg'
+    }
+    recommend {
+        listSize 25
+        candidates "allItems"
+        exclude "user.trainItems"
+        metric 'ndcg'
+        metric('map') {
+            goodItems 'user.testItems'
+        }
+        metric('mrr') {
+            goodItems 'user.testItems'
+        }
+    }
+}
+
+/* Evaluate logistic regression */
+task evaluateLogistic(type: TrainTest, group: 'evaluate') {
+    description 'Runs a LensKit evaluation to evaluate the logistic recommender.'
+
+    // we add our crossfold task as evaluation input
+    dataSet crossfold
+
+    // send the output to appropriate files
+    outputFile "build/logistic-results.csv"
+    userOutputFile "build/logistic-users.csv"
+    logFile "build/eval-logistic.log"
+
+    // configure our algorithms
+    algorithm 'cfg/popular.groovy'
+    algorithm 'cfg/ii.groovy'
+    algorithm 'cfg/svd.groovy'
+    algorithm 'cfg/lucene.groovy'
+    algorithm 'cfg/svd-log.groovy'
+    algorithm 'cfg/lucene-log.groovy'
+    algorithm 'cfg/lucene-svd-log.groovy'
+    algorithm 'cfg/ii-log.groovy'
+    algorithm 'cfg/ii-svd-log.groovy'
+
+    // and some evaluation tasks and metrics
+    predict {
+        metric 'coverage'
+        metric 'ndcg'
+    }
+    recommend {
+        listSize 25
+        candidates "allItems"
+        exclude "user.trainItems"
+        metric 'ndcg'
+        metric('map') {
+            goodItems 'user.testItems'
+        }
+        metric('mrr') {
+            goodItems 'user.testItems'
+        }
+    }
+}

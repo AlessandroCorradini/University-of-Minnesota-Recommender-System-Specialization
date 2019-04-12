@@ -1,0 +1,31 @@
+items:
+  file: items.json
+  entity_type: item
+  format: json
+  attributes:
+    id: long
+    asin: string
+    price: double
+    name: string
+    description: string
+    imUrl: string
+    salesRank: java.util.Map
+    brand: string
+    categories: string[][]
+users:
+  file: users.csv
+  entity_type: user
+  format: csv
+  header: true
+  columns:
+    id:
+      name: id
+      type: long
+    az_uid:
+      name: az_uid
+      type: string
+ratings:
+  file: ratings.csv
+  entity_type: rating
+  header: true
+  format: csv

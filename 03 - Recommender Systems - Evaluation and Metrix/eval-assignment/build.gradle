@@ -1,0 +1,97 @@
+buildscript {
+    repositories {
+        // LensKit snapshots are published to the Sonatype snapshot repository
+        maven {
+            url 'https://oss.sonatype.org/content/repositories/snapshots/'
+        }
+        // LensKit releases are published to Maven Central
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'org.lenskit:lenskit-gradle:3.0-M2'
+    }
+}
+
+ext.lenskitVersion = '3.0-M2'
+if (!hasProperty('dataDir')) {
+    ext.dataDir = 'data'
+}
+
+apply plugin: 'java'
+apply plugin: 'lenskit'
+
+apply from: "$rootDir/gradle/repositories.gradle"
+
+dependencies {
+    // Code needs to build with LensKit.
+    compile "org.lenskit:lenskit-all:$lenskitVersion"
+    compile "org.apache.lucene:lucene-analyzers:3.5.0"
+    compile "org.apache.lucene:lucene-queries:3.5.0"
+
+    // To run the code, we also need the LensKit CLI.
+    runtime "org.lenskit:lenskit-cli:$lenskitVersion"
+
+    // Tests use JUnit
+    testCompile "junit:junit:4.12"
+}
+
+/* Configure LensKit */
+lenskit {
+    // you can configure the threadCount and maxMemory here, or on the command line
+    // e.g. -Plenskit.threadCount=8
+}
+
+import org.lenskit.gradle.*
+
+test {
+    systemProperty 'data.dir', dataDir
+}
+
+task crossfold(type: Crossfold, group: 'evaluate') {
+    // download data before evaluating
+
+    input "$dataDir/movielens.yml"
+    // test on 5 random ratings for each user
+    holdout(5, 'random')
+    // use 5-fold cross-validation
+    partitionCount 5
+    // pack data for efficiency
+    outputFormat 'gz'
+}
+
+/* Run the LensKit evaluation */
+task evaluate(type: TrainTest, group: 'evaluate') {
+    description 'Runs the LensKit evaluation.'
+
+    // we add our crossfold task as evaluation input
+    dataSet crossfold
+
+    // send the output to appropriate files
+    outputFile "build/eval-results.csv"
+    userOutputFile "build/eval-users.csv"
+
+    // configure our algorithms
+    algorithm 'cfg/baselines.groovy'
+    // TODO Add user-user, item-item and lucene configs
+
+    // and some evaluation tasks and metrics
+    predict {
+        metric 'coverage'
+        metric 'rmse'
+        metric 'ndcg' // nDCG on predictions is rank effectiveness
+    }
+    recommend {
+        listSize 10
+        candidates "allItems"
+        exclude "user.trainItems"
+        metric 'length'
+        metric 'ndcg'
+        metric('mrr') {
+            goodItems 'user.testItems'
+        }
+        metric('map') {
+            goodItems 'user.testItems'
+        }
+        metric 'org.lenskit.mooc.TagEntropyMetric'
+    }
+}

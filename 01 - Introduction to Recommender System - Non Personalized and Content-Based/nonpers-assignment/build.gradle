@@ -1,0 +1,87 @@
+apply plugin: 'java'
+
+ext.lenskitVersion = '3.0-M1'
+if (!hasProperty('dataDir')) {
+    ext.dataDir = 'data'
+}
+
+sourceCompatibility = 1.7
+
+apply from: "$rootDir/gradle/repositories.gradle"
+
+dependencies {
+    compile "org.lenskit:lenskit-core:$lenskitVersion"
+    runtime "org.lenskit:lenskit-cli:$lenskitVersion"
+}
+dependencies {
+    testCompile group: 'junit', name: 'junit', version: '4.11'
+}
+
+task runMean(type: JavaExec, group: 'run') {
+    description "Run the simple mean recommender."
+    classpath sourceSets.main.runtimeClasspath
+    main 'org.lenskit.cli.Main'
+    args '--log-file', file("$buildDir/recommend-mean.log"), '--log-file-level', 'DEBUG'
+    args 'global-recommend'
+    args '--data-source', "$dataDir/movielens.yml"
+    args '-c', file('etc/mean.groovy')
+    args '-n', 10
+    if (project.hasProperty('lenskit.maxMemory')) {
+        maxHeapSize project.getProperty('lenskit.maxMemory')
+    }
+}
+
+task runDampedMean(type: JavaExec, group: 'run') {
+    description "Run the damped mean recommender."
+    mustRunAfter runMean
+    classpath sourceSets.main.runtimeClasspath
+    main 'org.lenskit.cli.Main'
+    args '--log-file', file("$buildDir/recommend-damped-mean.log"), '--log-file-level', 'DEBUG'
+    args 'global-recommend'
+    args '--data-source', "$dataDir/movielens.yml"
+    args '-c', file('etc/damped-mean.groovy')
+    if (project.hasProperty('lenskit.maxMemory')) {
+        maxHeapSize project.getProperty('lenskit.maxMemory')
+    }
+}
+
+task runBasicAssoc(type: JavaExec, group: 'run') {
+    description "Run the damped mean recommender."
+    mustRunAfter runDampedMean
+    classpath sourceSets.main.runtimeClasspath
+    main 'org.lenskit.cli.Main'
+    args '--log-file', file("$buildDir/recommend-basic-assoc.log"), '--log-file-level', 'DEBUG'
+    args 'global-recommend'
+    args '--data-source', "$dataDir/movielens.yml"
+    args '-c', file('etc/simple-assoc.groovy')
+    args findProperty('referenceItem') ?: 260
+    if (project.hasProperty('lenskit.maxMemory')) {
+        maxHeapSize project.getProperty('lenskit.maxMemory')
+    }
+}
+
+task runLiftAssoc(type: JavaExec, group: 'run') {
+    description "Run the damped mean recommender."
+    classpath sourceSets.main.runtimeClasspath
+    mustRunAfter runBasicAssoc
+    main 'org.lenskit.cli.Main'
+    args '--log-file', file("$buildDir/recommend-lift-assoc.log"), '--log-file-level', 'DEBUG'
+    args 'global-recommend'
+    args '--data-source', "$dataDir/movielens.yml"
+    args '-c', file('etc/lift-assoc.groovy')
+    args findProperty('referenceItem') ?: 2761
+    if (project.hasProperty('lenskit.maxMemory')) {
+        maxHeapSize project.getProperty('lenskit.maxMemory')
+    }
+}
+
+task runAll(group: 'run') {
+    dependsOn runMean, runDampedMean
+    dependsOn runBasicAssoc, runLiftAssoc
+}
+
+task prepareSubmission(type: Copy) {
+    from jar
+    into distsDir
+    rename(/-assignment/, '-submission')
+}

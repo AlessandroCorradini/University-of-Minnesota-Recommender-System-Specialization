@@ -10,8 +10,8 @@ This course covers:
 - Online Evaluation
 - Evaluation Design
 
-## Certificate of Completition
-You can see the [Certificate of Completition](https://github.com/AlessandroCorradini/Certificates/blob/master/Coursera%20-%20Recommender%20Systems%20Evaluation%20and%20Metrics%20-%20University%20of%20Minnesota.pdf) and other certificates in my [Certificates Repo](https://github.com/AlessandroCorradini/Certificates) that contains all my certificates obtained through my journey as a self-made Data Science and better developer.
+## Certificate of Completion
+You can see the [Certificate of Completion](https://github.com/AlessandroCorradini/Certificates/blob/master/Coursera%20-%20Recommender%20Systems%20Evaluation%20and%20Metrics%20-%20University%20of%20Minnesota.pdf) and other certificates in my [Certificates Repo](https://github.com/AlessandroCorradini/Certificates) that contains all my certificates obtained through my journey as a self-made Data Science and better developer.
 
 <br/>
 

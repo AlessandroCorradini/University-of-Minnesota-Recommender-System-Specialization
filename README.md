@@ -11,7 +11,7 @@
 4) [Matrix Factorization and Advanced Techniques](./04%20-%20Matrix%20Factorization%20and%20Advanced%20Techniques)
 5) [Capstone - TODO](./05%20-%20Recommender%20Systems%20Capstone)
 
-## Certificate of Completition
+## Certificate of Completion
 You can see the [Certificate of Completition - TODO](TODO) and other certificates in my [Certificates Repo](https://github.com/AlessandroCorradini/Certificates) that contains all my certificates obtained through my journey as a self-made Data Science and better developer.
 
 <br/>
